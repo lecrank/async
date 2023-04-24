@@ -31,7 +31,6 @@ func SingleHash(in, out chan interface{}) {
 	var m sync.Mutex
 
 	for num := range in {
-		// fmt.Println("SingleHash got", num)
 		intNum := num.(int)
 
 		dataConn := make(chan string, 1)
@@ -50,7 +49,6 @@ func SingleHash(in, out chan interface{}) {
 		go func(in <-chan interface{}, connector <-chan string, out chan<- interface{}, w *sync.WaitGroup, n int) {
 			defer w.Done()
 			resultData := DataSignerCrc32(strconv.Itoa(n)) + "~" + (<-connector)
-			// fmt.Println(n, "SingleHash result", resultData)
 			out <- resultData
 		}(in, dataConn, out, &wg, intNum)
 	}
@@ -61,7 +59,6 @@ func MultiHash(in, out chan interface{}) {
 	var glWg sync.WaitGroup
 
 	for hash := range in {
-		// fmt.Println("MultiHash got", hash)
 		var multiResult string
 
 		resMultiHash := make([]string, 6)
@@ -77,7 +74,6 @@ func MultiHash(in, out chan interface{}) {
 				go func(data string, i int, results []string, pwg *sync.WaitGroup, m *sync.Mutex) {
 					defer pwg.Done()
 					hash := DataSignerCrc32(strconv.Itoa(i) + data)
-					// fmt.Println("Multihash", i, hash)
 					m.Lock()
 					results[i] = hash
 					m.Unlock()
@@ -88,7 +84,6 @@ func MultiHash(in, out chan interface{}) {
 			go func(con <-chan []string, wg *sync.WaitGroup) {
 				defer glWg.Done()
 				multiResult = strings.Join((<-con), "")
-				// fmt.Println("MultiHash sorted:", multiResult)
 				out <- multiResult
 			}(conChan, glWg)
 			conChan <- resMultiHash
@@ -106,6 +101,5 @@ func CombineResults(in, out chan interface{}) {
 	}
 	sort.Strings(allMultiHash)
 	joinedResult := strings.Join(allMultiHash, "_")
-	// fmt.Println("Combined:", joinedResult)
 	out <- joinedResult
 }
