@@ -64,43 +64,49 @@ func SingleHash(in, out chan interface{}) {
 	wg.Wait()
 }
 
+// Fills slice of strings with hashes for each step from 0 to 6
+func hashForEachStep(hash interface{}, resMultiHash []string) {
+	var m sync.Mutex
+	var wg sync.WaitGroup
+
+	wg.Add(numberOfSteps)
+	for i := 0; i < numberOfSteps; i++ {
+		go func(data string, i int, resMultHash []string, pwg *sync.WaitGroup, m *sync.Mutex) {
+			defer pwg.Done()
+			hash := DataSignerCrc32(strconv.Itoa(i) + data)
+			m.Lock()
+			resMultHash[i] = hash
+			m.Unlock()
+		}(hash.(string), i, resMultiHash, &wg, &m)
+	}
+	wg.Wait()
+}
+
 func MultiHash(in, out chan interface{}) {
-	var glWg sync.WaitGroup
+	var wg sync.WaitGroup
 
 	for hash := range in {
-		var multiResult string
-
-		resMultiHash := make([]string, numberOfSteps)
 		conChan := make(chan []string)
 
-		glWg.Add(1)
-		go func(hash interface{}, conChan chan []string, glWg *sync.WaitGroup) {
+		resMultiHash := make([]string, numberOfSteps)
 
-			var m sync.Mutex
-			var pvtWg sync.WaitGroup
-			pvtWg.Add(numberOfSteps)
-			for i := 0; i < numberOfSteps; i++ {
-				go func(data string, i int, results []string, pwg *sync.WaitGroup, m *sync.Mutex) {
-					defer pwg.Done()
-					hash := DataSignerCrc32(strconv.Itoa(i) + data)
-					m.Lock()
-					results[i] = hash
-					m.Unlock()
-				}(hash.(string), i, resMultiHash, &pvtWg, &m)
-			}
-			pvtWg.Wait() // Waits until all 6 are created
+		wg.Add(1)
+		go func(hash interface{}, resMultHash []string, conChan chan []string, glWg *sync.WaitGroup) {
 
-			go func(con <-chan []string, wg *sync.WaitGroup) {
+			hashForEachStep(hash, resMultiHash)
+
+			go func(con <-chan []string, hashesToJoin []string, wg *sync.WaitGroup) {
 				defer glWg.Done()
-				multiResult = strings.Join((<-con), "")
+				multiResult := strings.Join((<-con), "")
 				out <- multiResult
-			}(conChan, glWg)
+			}(conChan, resMultHash, glWg)
+
 			conChan <- resMultiHash
 
-		}(hash, conChan, &glWg)
+		}(hash, resMultiHash, conChan, &wg)
 
 	}
-	glWg.Wait() // Waits until all in-hashes are processed
+	wg.Wait() // Waits until all in-hashes are processed
 }
 
 func CombineResults(in, out chan interface{}) {
