@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+const numberOfSteps int = 6
+
 func ExecutePipeline(jobs ...job) {
 	inCh := make(chan interface{})
 	outCh := make(chan interface{})
@@ -26,6 +28,25 @@ func ExecutePipeline(jobs ...job) {
 	wg.Wait()
 }
 
+// Counts the first half of SingleHash
+func countHalf(con chan<- string, n int, w *sync.WaitGroup, m *sync.Mutex) {
+	strN := strconv.Itoa(n)
+	defer close(con)
+	defer w.Done()
+	m.Lock()
+	md5Data := DataSignerMd5(strN) // Overheat protection
+	m.Unlock()
+	con <- DataSignerCrc32(md5Data)
+}
+
+// Counts the second half of SingleHash
+func countAnother(con <-chan string, out chan<- interface{}, n int, w *sync.WaitGroup) {
+	defer w.Done()
+	strN := strconv.Itoa(n)
+	resultData := DataSignerCrc32(strN) + "~" + (<-con)
+	out <- resultData
+}
+
 func SingleHash(in, out chan interface{}) {
 	var wg sync.WaitGroup
 	var m sync.Mutex
@@ -33,24 +54,12 @@ func SingleHash(in, out chan interface{}) {
 	for num := range in {
 		intNum := num.(int)
 
-		dataConn := make(chan string, 1)
+		dataConnector := make(chan string, 1)
 
 		wg.Add(2)
 
-		go func(in <-chan interface{}, connector chan<- string, data string, w *sync.WaitGroup, m *sync.Mutex) {
-			defer close(connector)
-			defer w.Done()
-			m.Lock()
-			md5Data := DataSignerMd5(data) // Overheat protection
-			m.Unlock()
-			connector <- DataSignerCrc32(md5Data)
-		}(in, dataConn, strconv.Itoa(intNum), &wg, &m)
-
-		go func(in <-chan interface{}, connector <-chan string, out chan<- interface{}, w *sync.WaitGroup, n int) {
-			defer w.Done()
-			resultData := DataSignerCrc32(strconv.Itoa(n)) + "~" + (<-connector)
-			out <- resultData
-		}(in, dataConn, out, &wg, intNum)
+		go countHalf(dataConnector, intNum, &wg, &m)
+		go countAnother(dataConnector, out, intNum, &wg)
 	}
 	wg.Wait()
 }
@@ -61,16 +70,16 @@ func MultiHash(in, out chan interface{}) {
 	for hash := range in {
 		var multiResult string
 
-		resMultiHash := make([]string, 6)
+		resMultiHash := make([]string, numberOfSteps)
 		conChan := make(chan []string)
-
-		var m sync.Mutex
 
 		glWg.Add(1)
 		go func(hash interface{}, conChan chan []string, glWg *sync.WaitGroup) {
+
+			var m sync.Mutex
 			var pvtWg sync.WaitGroup
-			pvtWg.Add(6)
-			for i := 0; i < 6; i++ {
+			pvtWg.Add(numberOfSteps)
+			for i := 0; i < numberOfSteps; i++ {
 				go func(data string, i int, results []string, pwg *sync.WaitGroup, m *sync.Mutex) {
 					defer pwg.Done()
 					hash := DataSignerCrc32(strconv.Itoa(i) + data)
