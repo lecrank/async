@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const numberOfSteps int = 6
+const multiHashStepsAmount int = 6
 
 func ExecutePipeline(jobs ...job) {
 	inCh := make(chan interface{})
@@ -64,20 +64,19 @@ func SingleHash(in, out chan interface{}) {
 	wg.Wait()
 }
 
-// Fills slice of strings with hashes for each step from 0 to 6
-func hashForEachStep(hash interface{}, resMultiHash []string) {
-	var m sync.Mutex
+// Calculates a hash for each step
+func oneStepComputation(wg *sync.WaitGroup, data string, dest *string) {
+	defer wg.Done()
+	*dest = DataSignerCrc32(data)
+}
+
+// Fills the string slice with hashes for each step from 0 to 6
+func hashesForAllSteps(hash interface{}, resMultiHash []string) {
 	var wg sync.WaitGroup
 
-	wg.Add(numberOfSteps)
-	for i := 0; i < numberOfSteps; i++ {
-		go func(data string, i int, resMultHash []string, pwg *sync.WaitGroup, m *sync.Mutex) {
-			defer pwg.Done()
-			hash := DataSignerCrc32(strconv.Itoa(i) + data)
-			m.Lock()
-			resMultHash[i] = hash
-			m.Unlock()
-		}(hash.(string), i, resMultiHash, &wg, &m)
+	wg.Add(multiHashStepsAmount)
+	for i := 0; i < multiHashStepsAmount; i++ {
+		go oneStepComputation(&wg, strconv.Itoa(i)+hash.(string), &resMultiHash[i])
 	}
 	wg.Wait()
 }
@@ -88,20 +87,20 @@ func MultiHash(in, out chan interface{}) {
 	for hash := range in {
 		conChan := make(chan []string)
 
-		resMultiHash := make([]string, numberOfSteps)
+		resMultiHash := make([]string, multiHashStepsAmount)
 
 		wg.Add(1)
 		go func(hash interface{}, resMultHash []string, conChan chan []string, glWg *sync.WaitGroup) {
 
-			hashForEachStep(hash, resMultiHash)
+			hashesForAllSteps(hash, resMultHash)
 
-			go func(con <-chan []string, hashesToJoin []string, wg *sync.WaitGroup) {
+			go func(con <-chan []string, wg *sync.WaitGroup) {
 				defer glWg.Done()
 				multiResult := strings.Join((<-con), "")
 				out <- multiResult
-			}(conChan, resMultHash, glWg)
+			}(conChan, glWg)
 
-			conChan <- resMultiHash
+			conChan <- resMultHash
 
 		}(hash, resMultiHash, conChan, &wg)
 
